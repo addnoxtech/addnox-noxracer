@@ -3,14 +3,31 @@
   const $ = id => document.getElementById(id);
   const canvas = $('game'), ctx = canvas.getContext('2d');
   const W = 420, H = 640, lanes = [106, 210, 314], playerY = 516;
+  // Retain the original score key so existing players keep their personal best.
   const storageKey = 'addnox-neon-racer-best-v1';
   let best = 0;
   try { best = Math.max(0, Number(localStorage.getItem(storageKey)) || 0); } catch {}
   const state = { mode: 'ready', lane: 1, x: 210, elapsed: 0, distance: 0, coins: 0, score: 0, road: 0, timer: 0, objects: [], particles: [], velocity: 240 };
   let lastTime = 0, sound = false, audio, swipeX = null, swipeY = null;
+  const supportsVibration = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+  const hapticsKey = 'nox-race-haptics-v1';
+  let hapticsEnabled = true;
+  try { hapticsEnabled = localStorage.getItem(hapticsKey) !== 'off'; } catch {}
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   $('year').textContent = new Date().getFullYear();
 
+  function vibrate(pattern) {
+    if (!supportsVibration) return;
+    try { navigator.vibrate(pattern); } catch { /* Hardware feedback must never interrupt a run. */ }
+  }
+  function syncHaptics() {
+    const enabled = supportsVibration && hapticsEnabled;
+    $('haptics').disabled = !supportsVibration;
+    $('haptics').textContent = !supportsVibration ? 'HAPTICS N/A' : enabled ? 'HAPTICS ON' : 'HAPTICS OFF';
+    $('haptics').setAttribute('aria-pressed', String(enabled));
+    $('haptics').setAttribute('aria-label', !supportsVibration ? 'Vibration is unavailable in this browser' : enabled ? 'Disable lane-change vibration' : 'Enable lane-change vibration');
+    $('haptics-note').textContent = !supportsVibration ? 'Vibration is not available in this browser.' : enabled ? 'Lane-change vibration enabled.' : 'Lane-change vibration off.';
+  }
   function tone(frequency, duration = .07, type = 'sine', volume = .04) {
     if (!sound) return;
     try {
@@ -49,11 +66,16 @@
   }
   function move(direction) {
     if (state.mode !== 'playing') return;
-    state.lane = Math.max(0, Math.min(2, state.lane + direction)); tone(180, .025, 'triangle', .018);
+    const nextLane = Math.max(0, Math.min(2, state.lane + direction));
+    if (nextLane === state.lane) return;
+    state.lane = nextLane;
+    if (hapticsEnabled) vibrate(25);
+    tone(180, .025, 'triangle', .018);
   }
   function pause() {
     if (state.mode !== 'playing' && state.mode !== 'paused') return;
     if (state.mode === 'playing') {
+      vibrate(0);
       state.mode = 'paused'; $('pause').textContent = '▶'; $('pause').setAttribute('aria-label', 'Resume game');
       showOverlay('TAKE A BREATHER', 'Parked for a moment.', 'Your run is waiting right here.', 'BACK TO THE ROAD', 'Ⅱ');
     } else {
@@ -65,6 +87,7 @@
     for (let i = 0; i < count; i++) state.particles.push({ x, y, vx: (Math.random() - .5) * 180, vy: (Math.random() - .5) * 180, life: .6, color });
   }
   function end() {
+    vibrate(0);
     state.mode = 'over'; const newBest = state.score > best;
     best = Math.max(best, state.score);
     try { localStorage.setItem(storageKey, String(best)); } catch {}
@@ -164,6 +187,13 @@
   $('left').addEventListener('click', event => { if (event.detail === 0) move(-1); });
   $('right').addEventListener('click', event => { if (event.detail === 0) move(1); });
   $('pause').addEventListener('click', pause);
+  $('haptics').addEventListener('click', () => {
+    if (!supportsVibration) return;
+    hapticsEnabled = !hapticsEnabled;
+    try { localStorage.setItem(hapticsKey, hapticsEnabled ? 'on' : 'off'); } catch {}
+    if (!hapticsEnabled) vibrate(0);
+    syncHaptics();
+  });
   $('sound').addEventListener('click', () => { sound = !sound; $('sound').textContent = sound ? 'SOUND ON' : 'SOUND OFF'; $('sound').setAttribute('aria-label', sound ? 'Disable sound' : 'Enable sound'); $('sound').setAttribute('aria-pressed', String(sound)); tone(540); });
   document.addEventListener('keydown', event => {
     if (event.repeat) return;
@@ -185,5 +215,5 @@
   canvas.addEventListener('pointercancel', () => { swipeX = null; swipeY = null; });
   document.addEventListener('visibilitychange', () => { if (document.hidden && state.mode === 'playing') pause(); });
   window.addEventListener('blur', () => { if (state.mode === 'playing') pause(); });
-  syncHud(); draw(); requestAnimationFrame(frame);
+  syncHaptics(); syncHud(); draw(); requestAnimationFrame(frame);
 })();
